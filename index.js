@@ -14,53 +14,84 @@ const NUM_SECOND_PAGE_PIXELS = 2601;
 const ICON_SIZE = 72;
 const NUM_TOTAL_PIXELS = NUM_FIRST_PAGE_PIXELS + NUM_SECOND_PAGE_PIXELS;
 const keyState = new Array(NUM_KEYS).fill(false);
-const devices = HID.devices();
-const connectedStreamDecks = devices.filter(device => {
-	return device.vendorId === 0x0fd9 && device.productId === 0x0060;
-});
-
-if (connectedStreamDecks.length > 1) {
-	throw new Error('More than one Stream Deck is connected. This is unsupported at this time.');
-}
-
-if (connectedStreamDecks.length < 1) {
-	throw new Error('No Stream Decks are connected.');
-}
 
 class StreamDeck extends EventEmitter {
-	constructor(device) {
+	constructor() {
 		super();
-		this.device = device;
+	  this.init();
+    setInterval(this.init, 300);
+  }
 
-		this.device.on('data', data => {
-			// The first byte is a report ID, the last byte appears to be padding
-			// strip these out for now.
-			data = data.slice(1, data.length - 1);
+  init() {
+    var devices = HID.devices();
+    var connectedStreamDecks = devices.filter(device => {
+      return device.vendorId === 0x0fd9 && device.productId === 0x0060;
+    });
 
-			for (let i = 0; i < NUM_KEYS; i++) {
-				const keyPressed = Boolean(data[i]);
-				if (keyPressed !== keyState[i]) {
-					if (keyPressed) {
-						this.emit('down', i);
-					} else {
-						this.emit('up', i);
-					}
-				}
+    if (connectedStreamDecks.length > 1) {
+      if (this.device != null) {
+        this.device.removeListener('data');
+        this.device.removeListener('error');
+      }
+      this.device = null;
+      console.warn('more than one Stream Deck is connected. this is unsupported at this time.');
+      return ;
+    }
 
-				keyState[i] = keyPressed;
-			}
-		});
+    if (connectedStreamDecks.length < 1) {
+      if (this.device != null) {
+        this.device.removeListener('data');
+        this.device.removeListener('error');
+      }
+      this.device = null;
+      console.log('No Stream Decks are connected.');
+      return ;
+    }
 
-		this.device.on('error', err => {
-			this.emit('error', err);
-		});
-	}
+    var prevDevice = this.device;
+    this.device = new HID.HID(connectedStreamDecks[0].path);
+
+    this.device.on('data', data => {
+      // The first byte is a report ID, the last byte appears to be padding
+      // strip these out for now.
+      data = data.slice(1, data.length - 1);
+
+      for (let i = 0; i < NUM_KEYS; i++) {
+        const keyPressed = Boolean(data[i]);
+        if (keyPressed !== keyState[i]) {
+          if (keyPressed) {
+            this.emit('down', i);
+          } else {
+            this.emit('up', i);
+          }
+        }
+
+        keyState[i] = keyPressed;
+      }
+    });
+
+    this.device.on('error', err => {
+      this.emit('error', err);
+    });
+    if (prevDevice != null) {
+      prevDevice.removeListener('data');
+      prevDevice.removeListener('error');
+    }
+  }
 
 	write(buffer) {
+    if (this.device == null) {
+      console.warn('no device detected.');
+      return null;
+    }
 		return this.device.write(StreamDeck.bufferToIntArray(buffer));
 	}
 
 	fillColor(keyIndex, r, g, b) {
+    if (this.device == null) {
+      console.warn('no device detected.');
+      return null;
+    }
 		const pixel = Buffer.from([b, g, r]);
 		this._writePage1(keyIndex, Buffer.alloc(NUM_FIRST_PAGE_PIXELS * 3, pixel));
 		this._writePage2(keyIndex, Buffer.alloc(NUM_SECOND_PAGE_PIXELS * 3, pixel));
@@ -149,4 +180,4 @@ class StreamDeck extends EventEmitter {
 	}
 }
 
-module.exports = new StreamDeck(new HID.HID(connectedStreamDecks[0].path));
+module.exports = new StreamDeck();
